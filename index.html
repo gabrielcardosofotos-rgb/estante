@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Estante</title>
+<meta name="theme-color" content="#1b140f">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Estante">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{
+  --ember:#c97a3d; --ember-soft:#e0a96d;
+  --serif:'Iowan Old Style','Palatino Linotype',Georgia,serif;
+  --display:Georgia,'Times New Roman',serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{
+  background:radial-gradient(120% 140% at 50% -10%,#2a2014,#1b140f 55%,#120d09);
+  color:#f3ecdf; font-family:var(--serif);
+  position:fixed;inset:0;
+}
+#app{height:100%;width:100%;position:relative}
+body.reading .fab{display:none!important}
+
+/* ── LIBRARY ── */
+#library{height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:calc(env(safe-area-inset-top)+22px) 18px 100px}
+.lib-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;padding:0 4px}
+.lib-title{font-family:var(--display);font-size:28px;font-weight:400;color:#f3ecdf}
+.lib-title em{color:var(--ember-soft);font-style:normal}
+.lib-count{font-size:12px;color:#a89a85;letter-spacing:1px;text-transform:uppercase}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 14px}
+.book-cell{display:flex;flex-direction:column;align-items:center}
+.book{
+  position:relative;aspect-ratio:2/3;width:100%;
+  border-radius:4px;
+  background:linear-gradient(160deg,#3a2c1d,#20170f);
+  box-shadow:0 10px 18px rgba(0,0,0,.4),inset 0 0 0 1px rgba(255,255,255,.04);
+  overflow:hidden;cursor:pointer;transition:transform .15s
+}
+.book:active{transform:scale(.96)}
+.book img{width:100%;height:100%;object-fit:cover;display:block}
+.book .fallback{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  padding:10px;text-align:center;font-size:11px;line-height:1.4;color:var(--ember-soft);
+  background:repeating-linear-gradient(135deg,#2c2118,#2c2118 10px,#261c13 10px,#261c13 20px)
+}
+.book .spine{position:absolute;left:0;top:0;bottom:0;width:6px;
+  background:linear-gradient(90deg,rgba(0,0,0,.5),transparent)}
+.done-badge{
+  position:absolute;top:6px;right:-22px;background:var(--ember);color:#1b140f;
+  font-size:9px;font-weight:700;letter-spacing:1px;padding:3px 24px;
+  transform:rotate(40deg);overflow:hidden
+}
+.book-meta{margin-top:5px;font-size:11px;color:#a89a85;text-align:center}
+.book-meta.is-done{color:var(--ember-soft);font-weight:600}
+.empty-state{margin-top:30vh;text-align:center;color:#a89a85;padding:0 30px}
+.empty-state .glyph{font-size:34px;margin-bottom:10px;color:var(--ember-soft)}
+.empty-state p{font-size:14px;line-height:1.6}
+.fab{
+  position:fixed;right:20px;bottom:calc(env(safe-area-inset-bottom)+22px);
+  width:56px;height:56px;border-radius:50%;
+  background:linear-gradient(160deg,var(--ember-soft),var(--ember));
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 10px 24px rgba(201,122,61,.45);
+  border:none;color:#1b140f;font-size:28px;font-weight:300;z-index:20
+}
+.fab:active{transform:scale(.92)}
+#fileInput{display:none}
+
+/* ── READER ── */
+#reader{position:fixed;inset:0;display:none;flex-direction:column;background:#fff}
+#reader.open{display:flex}
+.reader-bar{
+  position:relative;z-index:10;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:calc(env(safe-area-inset-top)+10px) 14px 10px;
+  background:inherit;border-bottom:1px solid rgba(0,0,0,.07)
+}
+.reader-bar button{
+  background:none;border:none;font-size:15px;
+  font-family:var(--serif);padding:6px 8px;cursor:pointer
+}
+.page-label{font-size:12px;letter-spacing:.3px;color:#888}
+
+/* ── PAGE STAGE & FLIP LAYERS ── */
+.page-stage{flex:1;position:relative;overflow:hidden;perspective:2000px;perspective-origin:center center}
+
+/* Layer order: base(1) < shadow(2) < front(3) < flap(4) */
+.page-layer{position:absolute;inset:0}
+#pageBase{z-index:1}
+#pageShadow{z-index:2;pointer-events:none;transition:none}
+#pageFront{z-index:3}
+#pageFlap{
+  position:absolute;top:0;bottom:0;z-index:4;
+  transform-style:preserve-3d;display:none;
+  overflow:visible
+}
+.flap-face{
+  position:absolute;inset:0;overflow:hidden;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden
+}
+.flap-back-face{
+  position:absolute;inset:0;overflow:hidden;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  transform:rotateY(180deg)
+}
+.flap-fold-grad{
+  position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(to right,rgba(0,0,0,.22) 0%,rgba(0,0,0,.08) 15%,transparent 45%)
+}
+.flap-back-surface{position:absolute;inset:0}
+.flap-back-grad{
+  position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(to left,rgba(0,0,0,.15) 0%,rgba(0,0,0,.04) 30%,transparent 70%)
+}
+
+/* Tap zones (transparent, over page layers) */
+.tap-zones{position:absolute;inset:0;z-index:5;display:flex;pointer-events:none}
+.tap-zone{pointer-events:auto;flex:1;height:100%}
+.tap-zone-mid{pointer-events:auto;flex:1.4;height:100%}
+
+/* ── PAGE CONTENT ── */
+.page-inner{
+  position:absolute;inset:0;
+  box-sizing:border-box;overflow:hidden;
+  padding:24px 28px 32px;
+  font-size:18px;line-height:1.65;
+  text-align:justify;
+  -webkit-hyphens:auto;hyphens:auto;
+  overflow-wrap:break-word
+}
+/* EPUB content normalisation – only override what's needed */
+.page-inner *{max-width:100%!important;background:transparent!important}
+.page-inner img{max-width:100%!important;max-height:100%!important;height:auto!important;display:block;margin:auto}
+.page-inner h1,.page-inner h2,.page-inner h3,.page-inner h4{
+  text-align:left;line-height:1.25;margin:.4em 0 .6em;text-indent:0!important
+}
+.page-inner p{margin:0 0 .8em;text-indent:1.4em}
+.page-inner p:first-of-type{text-indent:0}
+
+/* Flap front inner: right-aligned so it shows the correct portion */
+.flap-front-inner{
+  position:absolute;top:0;right:0;bottom:0;
+  padding:24px 28px 32px;
+  font-size:inherit;line-height:1.65;
+  text-align:justify;-webkit-hyphens:auto;hyphens:auto;overflow-wrap:break-word;
+  overflow:hidden
+}
+.flap-front-inner *{max-width:100%!important;background:transparent!important}
+.flap-front-inner img{max-width:100%!important;max-height:100%!important;height:auto!important;display:block;margin:auto}
+.flap-front-inner h1,.flap-front-inner h2,.flap-front-inner h3{
+  text-align:left;line-height:1.25;margin:.4em 0 .6em;text-indent:0!important
+}
+.flap-front-inner p{margin:0 0 .8em;text-indent:1.4em}
+.flap-front-inner p:first-of-type{text-indent:0}
+
+/* ── MEASURE (off-screen paginator) ── */
+#measure{
+  position:fixed;left:-9999px;top:0;box-sizing:border-box;
+  padding:24px 28px 32px;overflow:hidden;
+  line-height:1.65;text-align:justify;
+  -webkit-hyphens:auto;hyphens:auto;overflow-wrap:break-word
+}
+#measure *{max-width:100%!important}
+#measure p{margin:0 0 .8em;text-indent:1.4em}
+#measure p:first-of-type{text-indent:0}
+#measure h1,#measure h2,#measure h3{text-align:left;line-height:1.25;margin:.4em 0 .6em;text-indent:0!important}
+#measure img{max-width:100%!important;max-height:100%!important;height:auto!important;display:block;margin:auto}
+
+/* ── HIGHLIGHT POPUP ── */
+#hiMenu{
+  position:fixed;z-index:50;display:none;
+  background:#222;border-radius:8px;padding:6px 8px;gap:8px;
+  align-items:center;box-shadow:0 4px 16px rgba(0,0,0,.4)
+}
+#hiMenu.show{display:flex}
+.hi-btn{
+  width:28px;height:28px;border-radius:50%;border:2px solid rgba(255,255,255,.3);
+  cursor:pointer;transition:transform .1s
+}
+.hi-btn:active{transform:scale(.85)}
+.hi-erase{
+  background:none;border:1px solid rgba(255,255,255,.3);
+  color:#fff;font-size:12px;border-radius:6px;padding:2px 7px;cursor:pointer
+}
+
+/* ── SETTINGS SHEET ── */
+.sheet-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:30;
+  opacity:0;pointer-events:none;transition:opacity .2s
+}
+.sheet-backdrop.open{opacity:1;pointer-events:auto}
+.sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:31;
+  background:#fff;color:#2b2117;border-radius:18px 18px 0 0;
+  padding:14px 20px calc(env(safe-area-inset-bottom)+24px);
+  transform:translateY(100%);transition:transform .25s;
+  box-shadow:0 -10px 40px rgba(0,0,0,.35)
+}
+.sheet.open{transform:translateY(0)}
+.sheet-handle{width:36px;height:4px;background:#ddd0b8;border-radius:2px;margin:4px auto 18px}
+.sheet-row{margin-bottom:20px}
+.sheet-row label{display:block;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#9c8b73;margin-bottom:10px}
+.font-controls{display:flex;align-items:center;gap:14px}
+.font-controls button{
+  width:40px;height:40px;border-radius:50%;border:1px solid #e7ddc9;
+  background:#fff;font-family:var(--serif);font-size:16px;color:#2b2117;cursor:pointer
+}
+.fsize{font-size:13px;color:#6b5a44;width:30px;text-align:center}
+.theme-options,.font-options{display:flex;gap:10px}
+.theme-swatch{width:42px;height:42px;border-radius:50%;border:2px solid transparent;cursor:pointer}
+.theme-swatch.active{border-color:var(--ember)}
+.ts-branco{background:#fff;box-shadow:inset 0 0 0 1px #ddd0b8}
+.ts-cinza{background:#52575D;box-shadow:inset 0 0 0 1px #444}
+.ts-preto{background:#000;box-shadow:inset 0 0 0 1px #333}
+.font-pill{
+  padding:9px 14px;border-radius:20px;border:1px solid #e7ddc9;
+  background:#fff;font-size:13px;color:#2b2117;cursor:pointer
+}
+.font-pill.active{background:var(--ember);color:#fff;border-color:var(--ember)}
+.danger-link{font-size:13px;color:#b5573a;text-align:center;margin-top:6px;cursor:pointer}
+
+/* ── LOADING ── */
+.loading,.loading-reader{
+  position:fixed;inset:0;background:rgba(27,20,15,.92);z-index:40;
+  display:none;align-items:center;justify-content:center;
+  flex-direction:column;color:#cbbfa9;gap:10px
+}
+.loading.show,.loading-reader.show{display:flex}
+.spinner{
+  width:28px;height:28px;border-radius:50%;
+  border:2px solid rgba(224,169,109,.25);border-top-color:var(--ember-soft);
+  animation:spin .8s linear infinite
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* marks */
+mark{padding:0 2px;border-radius:2px}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- LIBRARY -->
+<div id="library">
+  <div class="lib-header">
+    <div class="lib-title">Sua <em>estante</em></div>
+    <div class="lib-count" id="libCount">0 livros</div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="empty-state" id="emptyState">
+    <div class="glyph">⌂</div>
+    <p>Sua estante está vazia.<br>Toque no + para adicionar um epub.</p>
+  </div>
+</div>
+<button class="fab" id="addBtn">+</button>
+<input type="file" id="fileInput" accept=".epub" multiple>
+
+<!-- READER -->
+<div id="reader">
+  <div class="reader-bar" id="readerBar">
+    <button id="closeReader">‹ Estante</button>
+    <div class="page-label" id="pageLabel"></div>
+    <button id="openSettings">Aa</button>
+  </div>
+  <div class="page-stage" id="pageStage">
+    <div class="page-layer" id="pageBase"><div class="page-inner" id="pageInnerBase" lang="pt-BR"></div></div>
+    <div class="page-layer" id="pageShadow"></div>
+    <div class="page-layer" id="pageFront"><div class="page-inner" id="pageInnerFront" lang="pt-BR"></div></div>
+    <div id="pageFlap">
+      <div class="flap-face">
+        <div class="flap-front-inner" id="flapFrontInner" lang="pt-BR"></div>
+        <div class="flap-fold-grad"></div>
+      </div>
+      <div class="flap-back-face">
+        <div class="flap-back-surface" id="flapBackSurface"></div>
+        <div class="flap-back-grad"></div>
+      </div>
+    </div>
+    <div class="tap-zones">
+      <div class="tap-zone" id="tapPrev"></div>
+      <div class="tap-zone-mid" id="tapMid"></div>
+      <div class="tap-zone" id="tapNext"></div>
+    </div>
+  </div>
+</div>
+
+<!-- measure -->
+<div id="measure" lang="pt-BR"></div>
+
+<!-- Highlight menu -->
+<div id="hiMenu">
+  <button class="hi-btn" style="background:#FFE14D" data-color="#FFE14D"></button>
+  <button class="hi-btn" style="background:#FF6B6B" data-color="#FF6B6B"></button>
+  <button class="hi-btn" style="background:#74B9FF" data-color="#74B9FF"></button>
+  <button class="hi-erase" id="hiErase">✕</button>
+</div>
+
+<!-- Settings sheet -->
+<div class="sheet-backdrop" id="sheetBackdrop"></div>
+<div class="sheet" id="settingsSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-row">
+    <label>Tamanho da fonte</label>
+    <div class="font-controls">
+      <button id="fontMinus">A−</button>
+      <div class="fsize" id="fontSizeLabel">18</div>
+      <button id="fontPlus">A+</button>
+    </div>
+  </div>
+  <div class="sheet-row">
+    <label>Fonte</label>
+    <div class="font-options">
+      <button class="font-pill active" data-font="serif">Serifa</button>
+      <button class="font-pill" data-font="sans">Sem serifa</button>
+      <button class="font-pill" data-font="bold-sans">Negrito</button>
+    </div>
+  </div>
+  <div class="sheet-row">
+    <label>Cor da página</label>
+    <div class="theme-options">
+      <div class="theme-swatch ts-branco active" data-theme="branco" title="Branco"></div>
+      <div class="theme-swatch ts-cinza"  data-theme="cinza"  title="Cinza chumbo"></div>
+      <div class="theme-swatch ts-preto"  data-theme="preto"  title="Noite (fonte laranja)"></div>
+    </div>
+  </div>
+  <div class="sheet-row" style="margin-bottom:6px">
+    <div class="danger-link" id="removeBook">Remover este livro da estante</div>
+  </div>
+</div>
+
+<!-- Loading overlays -->
+<div class="loading" id="loading"><div class="spinner"></div><div id="loadingText">Importando…</div></div>
+<div class="loading-reader" id="loadingReader"><div class="spinner"></div><div>Paginando…</div></div>
+
+</div><!-- /app -->
+
+<script>
+/* ═══════════════════ THEME (global – all books share same theme) ═══════════════════ */
+const THEMES = {
+  branco: { bg:'#ffffff', text:'#1a1a1a', barBorder:'rgba(0,0,0,.08)', backSurface:'#f0ebe0' },
+  cinza:  { bg:'#52575D', text:'#f0f0f0', barBorder:'rgba(255,255,255,.08)', backSurface:'#444950' },
+  preto:  { bg:'#0a0a0a', text:'#e07020', barBorder:'rgba(255,255,255,.06)', backSurface:'#111' }
+};
+let globalTheme = localStorage.getItem('theme') || 'branco';
+let globalFontSize = parseInt(localStorage.getItem('fontSize') || '18', 10);
+let globalFont = localStorage.getItem('font') || 'serif';
+
+function fontCSS(f) {
+  if(f === 'sans')      return "'Avenir Next','Segoe UI',Helvetica,Arial,sans-serif";
+  if(f === 'bold-sans') return "'Avenir Next','Segoe UI',Helvetica,Arial,sans-serif";
+  return "'Iowan Old Style','Palatino Linotype',Georgia,serif";
+}
+function fontWeight(f){ return f === 'bold-sans' ? '700' : '400'; }
+
+function applyThemeTo(el) {
+  const t = THEMES[globalTheme];
+  el.style.fontSize   = globalFontSize + 'px';
+  el.style.fontFamily = fontCSS(globalFont);
+  el.style.fontWeight = fontWeight(globalFont);
+  el.style.color      = t.text;
+}
+function applyGlobalTheme(){
+  const t = THEMES[globalTheme];
+  const reader = document.getElementById('reader');
+  reader.style.background = t.bg;
+  document.getElementById('pageBase').style.background = t.bg;
+  document.getElementById('pageFront').style.background = t.bg;
+  document.getElementById('pageFlap').style.background = 'transparent';
+  document.getElementById('flapBackSurface').style.background = t.backSurface;
+  const bar = document.getElementById('readerBar');
+  bar.style.background = t.bg;
+  bar.style.borderBottomColor = t.barBorder;
+  bar.querySelectorAll('button').forEach(b => b.style.color = t.text);
+  document.querySelector('.page-label').style.color = t.text === '#1a1a1a' ? '#888' : 'rgba(255,255,255,.5)';
+  [document.getElementById('pageInnerFront'),
+   document.getElementById('pageInnerBase'),
+   document.getElementById('flapFrontInner'),
+   document.getElementById('measure')].forEach(applyThemeTo);
+  // sheet stays light
+  document.getElementById('fontSizeLabel').textContent = globalFontSize;
+  document.querySelectorAll('.font-pill').forEach(b => b.classList.toggle('active', b.dataset.font === globalFont));
+  document.querySelectorAll('.theme-swatch').forEach(s => s.classList.toggle('active', s.dataset.theme === globalTheme));
+}
+
+/* ═══════════════════ INDEXEDDB ═══════════════════ */
+const DB_NAME='estante-db', DB_VER=2, STORE='books';
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r = indexedDB.open(DB_NAME, DB_VER);
+    r.onupgradeneeded = e=>{
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE,{keyPath:'id'});
+    };
+    r.onsuccess = ()=>res(r.result);
+    r.onerror   = ()=>rej(r.error);
+  });
+}
+async function dbPut(book){ const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE,'readwrite'); tx.objectStore(STORE).put(book); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); }
+async function dbGetAll(){ const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE,'readonly'); const r=tx.objectStore(STORE).getAll(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); }); }
+async function dbDelete(id){ const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(STORE,'readwrite'); tx.objectStore(STORE).delete(id); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); }
+
+/* ═══════════════════ EPUB PARSER ═══════════════════ */
+function resolveRel(base, rel){
+  if(rel.startsWith('/')) return rel.slice(1);
+  if(rel.startsWith('http')) return null;
+  const parts = base.split('/'); parts.pop();
+  rel.split('/').forEach(p=>{ if(p==='..')parts.pop(); else if(p!=='.')parts.push(p); });
+  return parts.join('/');
+}
+async function blobToDataURL(blob){ return new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(fr.result); fr.readAsDataURL(blob); }); }
+
+function scopeCSS(css, scope){
+  // Remove comments
+  css = css.replace(/\/\*[\s\S]*?\*\//g,'');
+  // Scope each selector block (skip @rules)
+  return css.replace(/([^{}@][^{}]*)\{/g,(m,sel)=>{
+    const scoped = sel.split(',').map(s=>{
+      s=s.trim(); if(!s) return '';
+      if(/^(body|html)$/.test(s)) return scope;
+      if(s.startsWith('body ')) return scope+' '+s.slice(5);
+      if(s.startsWith('html ')) return scope+' '+s.slice(5);
+      return scope+' '+s;
+    }).filter(Boolean).join(',');
+    return scoped+'{';
+  });
+}
+
+async function parseEpub(buf){
+  const zip = await JSZip.loadAsync(buf);
+  const containerXml = await zip.file('META-INF/container.xml').async('string');
+  const containerDoc = new DOMParser().parseFromString(containerXml,'application/xml');
+  const opfPath = containerDoc.querySelector('rootfile').getAttribute('full-path');
+  const opfDir  = opfPath.includes('/') ? opfPath.slice(0,opfPath.lastIndexOf('/')+1) : '';
+  const opfText = await zip.file(opfPath).async('string');
+  const opfDoc  = new DOMParser().parseFromString(opfText,'application/xml');
+
+  const manifest = {};
+  opfDoc.querySelectorAll('manifest > item').forEach(it=>{
+    manifest[it.getAttribute('id')] = { href:it.getAttribute('href'), type:it.getAttribute('media-type') };
+  });
+  const spineIds = Array.from(opfDoc.querySelectorAll('spine > itemref')).map(it=>it.getAttribute('idref'));
+
+  // Title
+  let title = 'Sem título';
+  const tn = opfDoc.querySelector('metadata title') || opfDoc.getElementsByTagName('dc:title')[0];
+  if(tn && tn.textContent) title = tn.textContent.trim();
+
+  // Cover
+  let coverURL = null;
+  const coverMeta = opfDoc.querySelector('metadata > meta[name="cover"]');
+  if(coverMeta){ const id=coverMeta.getAttribute('content'); if(manifest[id]) coverURL=manifest[id].href; }
+  if(!coverURL){ const it=Object.values(manifest).find(it=>/cover/i.test(it.href)&&it.type?.startsWith('image')); if(it) coverURL=it.href; }
+  let coverDataURL = null;
+  if(coverURL){
+    const f = zip.file(opfDir+coverURL);
+    if(f) coverDataURL = await blobToDataURL(await f.async('blob'));
+  }
+
+  // Chapters
+  const chapters = [];
+  for(const id of spineIds){
+    const item = manifest[id]; if(!item) continue;
+    const fullPath = opfDir + item.href;
+    const file = zip.file(fullPath); if(!file) continue;
+    const html = await file.async('string');
+    const doc  = new DOMParser().parseFromString(html,'text/html');
+
+    // Inline images
+    for(const img of doc.querySelectorAll('img')){
+      const src=img.getAttribute('src'); if(!src) continue;
+      const imgPath=resolveRel(fullPath,src); if(!imgPath) continue;
+      const imgFile=zip.file(imgPath);
+      if(imgFile) img.setAttribute('src', await blobToDataURL(await imgFile.async('blob')));
+    }
+
+    // Collect chapter CSS (from linked stylesheets + inline <style>)
+    let chCSS = '';
+    for(const link of doc.querySelectorAll('link[rel="stylesheet"]')){
+      const href=link.getAttribute('href'); if(!href) continue;
+      const p=resolveRel(fullPath,href); if(!p) continue;
+      const cf=zip.file(p);
+      if(cf){ chCSS += await cf.async('string'); }
+    }
+    for(const style of doc.querySelectorAll('style')) chCSS += style.textContent;
+
+    // Scope the CSS so it only applies inside .page-inner / #measure
+    let scopedCSS = '';
+    if(chCSS.trim()){
+      try{ scopedCSS = scopeCSS(chCSS, '.page-inner') + scopeCSS(chCSS,'#measure'); }
+      catch(e){ /* ignore bad CSS */ }
+    }
+
+    // Remove inline font-size / font-family / color / background so our settings win
+    doc.querySelectorAll('[style]').forEach(el=>{
+      let s = el.getAttribute('style');
+      s = s.replace(/font-size\s*:[^;]+;?/gi,'')
+           .replace(/font-family\s*:[^;]+;?/gi,'')
+           .replace(/\bcolor\s*:[^;]+;?/gi,'')
+           .replace(/background[^:]*:[^;]+;?/gi,'');
+      el.setAttribute('style',s);
+    });
+
+    chapters.push({ html: doc.body ? doc.body.innerHTML : html, css: scopedCSS });
+  }
+
+  return { title, coverDataURL, chapters };
+}
+
+/* ═══════════════════ LIBRARY ═══════════════════ */
+let library = [];
+async function loadLibrary(){ library = await dbGetAll(); renderGrid(); }
+
+function renderGrid(){
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('emptyState');
+  grid.innerHTML = '';
+  empty.style.display = library.length ? 'none' : 'block';
+  document.getElementById('libCount').textContent = library.length + (library.length===1?' livro':' livros');
+
+  const sorted = [...library].sort((a,b)=>{
+    const ad=(a.progressPct||0)>=100, bd=(b.progressPct||0)>=100;
+    if(ad!==bd) return ad?1:-1;
+    return (b.progressPct||0)-(a.progressPct||0);
+  });
+
+  sorted.forEach(book=>{
+    const cell = document.createElement('div'); cell.className='book-cell';
+    const div  = document.createElement('div'); div.className='book'; div.dataset.id=book.id;
+    if(book.coverDataURL){ const img=document.createElement('img'); img.src=book.coverDataURL; div.appendChild(img); }
+    else { const fb=document.createElement('div'); fb.className='fallback'; fb.textContent=book.title; div.appendChild(fb); }
+    const sp=document.createElement('div'); sp.className='spine'; div.appendChild(sp);
+    const isDone=(book.progressPct||0)>=100;
+    if(isDone){ const b=document.createElement('div'); b.className='done-badge'; b.textContent='LIDO'; div.appendChild(b); }
+    div.addEventListener('click',()=>openBook(book.id));
+    cell.appendChild(div);
+    const meta=document.createElement('div');
+    meta.className='book-meta'+(isDone?' is-done':'');
+    meta.textContent = isDone?'Lido':((book.progressPct||0)+'%');
+    cell.appendChild(meta);
+    grid.appendChild(cell);
+  });
+}
+
+/* ═══════════════════ IMPORT ═══════════════════ */
+document.getElementById('addBtn').addEventListener('click',()=>document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change',async e=>{
+  const files=Array.from(e.target.files); if(!files.length) return;
+  const loading=document.getElementById('loading');
+  loading.classList.add('show');
+  for(const file of files){
+    document.getElementById('loadingText').textContent='Importando "'+file.name+'"…';
+    try{
+      const buf=await file.arrayBuffer();
+      const parsed=await parseEpub(buf);
+      await dbPut({
+        id:'b_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
+        title:parsed.title, coverDataURL:parsed.coverDataURL,
+        chapters:parsed.chapters,
+        progress:{chapterIndex:0,fracInChapter:0},
+        progressPct:0,
+        highlights:[]
+      });
+    }catch(err){ console.error(err); alert('Não consegui importar "'+file.name+'". Epub inválido?'); }
+  }
+  loading.classList.remove('show');
+  e.target.value='';
+  await loadLibrary();
+});
+
+/* ═══════════════════ READER STATE ═══════════════════ */
+let currentBook = null;
+let bookPages   = [];   // [{chapterIndex, html, css}]
+let curIdx      = 0;
+
+/* ═══════════════════ OPEN / CLOSE ═══════════════════ */
+async function openBook(id){
+  currentBook = library.find(b=>b.id===id);
+  if(!currentBook) return;
+  applyGlobalTheme();
+  document.body.classList.add('reading');
+  document.getElementById('reader').classList.add('open');
+  await paginate();
+}
+document.getElementById('closeReader').addEventListener('click',()=>{
+  document.getElementById('reader').classList.remove('open');
+  document.body.classList.remove('reading');
+  renderGrid();
+});
+
+/* ═══════════════════ PAGINATOR ═══════════════════ */
+const measure = document.getElementById('measure');
+
+function setupMeasure(){
+  const stage = document.getElementById('pageStage');
+  measure.style.width  = stage.clientWidth  + 'px';
+  measure.style.height = stage.clientHeight + 'px';
+  measure.style.fontSize   = globalFontSize + 'px';
+  measure.style.fontFamily = fontCSS(globalFont);
+  measure.style.fontWeight = fontWeight(globalFont);
+  measure.style.color      = THEMES[globalTheme].text;
+}
+
+function paginateChapter(chapter){
+  const tmp = document.createElement('div');
+  tmp.innerHTML = chapter.html;
+  // inject chapter CSS into measure
+  if(chapter.css){ let s=measure.querySelector('style.ch-css'); if(!s){s=document.createElement('style');s.className='ch-css';measure.appendChild(s);} s.textContent=chapter.css; }
+  else { const s=measure.querySelector('style.ch-css'); if(s)s.textContent=''; }
+
+  const nodes = Array.from(tmp.childNodes).filter(n=>!(n.nodeType===3&&!n.textContent.trim()));
+  const pages = [];
+  measure.querySelectorAll(':not(style)').forEach(n=>n.remove()); // clear non-style children
+  let guard=0;
+  const queue=[...nodes];
+  while(queue.length){
+    if(++guard>15000) break;
+    const node=queue.shift();
+    measure.appendChild(node.cloneNode(true));
+    if(measure.scrollHeight <= measure.clientHeight+2) continue;
+    // doesn't fit – remove last
+    const lastChild = measure.lastElementChild;
+    if(lastChild && lastChild.tagName!=='STYLE') measure.removeChild(lastChild);
+    if(!measure.querySelector(':not(style)')){
+      // single node doesn't fit – try splitting text nodes
+      const clone=node.cloneNode(true);
+      if(node.nodeType===1&&node.textContent.trim()){
+        const words=clone.textContent.split(/\s+/).filter(Boolean);
+        let lo=1,hi=words.length,fit=1;
+        while(lo<=hi){ const mid=(lo+hi)>>1; clone.textContent=words.slice(0,mid).join(' ');
+          measure.innerHTML=''; measure.appendChild(clone.cloneNode(true));
+          if(measure.scrollHeight<=measure.clientHeight+2){fit=mid;lo=mid+1;}else{hi=mid-1;} }
+        measure.innerHTML='';
+        const a=node.cloneNode(false); a.textContent=words.slice(0,Math.max(1,fit)).join(' ');
+        measure.appendChild(a);
+        pages.push(buildPageHTML(measure, chapter.css));
+        measure.querySelectorAll(':not(style)').forEach(n=>n.remove());
+        const rest=words.slice(Math.max(1,fit)).join(' ');
+        if(rest){ const b=node.cloneNode(false); b.textContent=rest; queue.unshift(b); }
+      } else {
+        measure.appendChild(node.cloneNode(true));
+        pages.push(buildPageHTML(measure, chapter.css));
+        measure.querySelectorAll(':not(style)').forEach(n=>n.remove());
+      }
+    } else {
+      pages.push(buildPageHTML(measure, chapter.css));
+      measure.querySelectorAll(':not(style)').forEach(n=>n.remove());
+      queue.unshift(node);
+    }
+  }
+  if(measure.querySelector(':not(style)')){
+    pages.push(buildPageHTML(measure, chapter.css));
+    measure.querySelectorAll(':not(style)').forEach(n=>n.remove());
+  }
+  if(!pages.length) pages.push('<p style="text-align:center;opacity:.5">(vazio)</p>');
+  return pages;
+}
+
+function buildPageHTML(el, css){
+  const styleTag = css ? `<style>${css}</style>` : '';
+  return styleTag + el.innerHTML;
+}
+
+async function paginate(){
+  document.getElementById('loadingReader').classList.add('show');
+  await new Promise(r=>requestAnimationFrame(r)); await new Promise(r=>requestAnimationFrame(r));
+  setupMeasure();
+  const flat=[]; const chStarts=[];
+  for(let c=0;c<currentBook.chapters.length;c++){
+    chStarts.push(flat.length);
+    paginateChapter(currentBook.chapters[c]).forEach(html=>flat.push({chapterIndex:c, html}));
+  }
+  bookPages=flat;
+  const prog=currentBook.progress||{chapterIndex:0,fracInChapter:0};
+  const c=Math.min(prog.chapterIndex||0,currentBook.chapters.length-1);
+  const s=chStarts[c]??0, e=(chStarts[c+1]??flat.length)-1;
+  const off=Math.min(e-s, Math.round((prog.fracInChapter||0)*Math.max(1,e-s)));
+  curIdx=Math.max(0,Math.min(flat.length-1,s+off));
+  showPage(curIdx);
+  document.getElementById('loadingReader').classList.remove('show');
+}
+
+function showPage(idx){
+  curIdx=idx;
+  const pi=document.getElementById('pageInnerFront');
+  pi.innerHTML=bookPages[idx].html;
+  applyThemeTo(pi);
+  // apply saved highlights
+  applyHighlightsToEl(pi, bookPages[idx].chapterIndex);
+  updatePageUI();
+  saveProgress();
+}
+
+function updatePageUI(){
+  document.getElementById('pageLabel').textContent='Página '+(curIdx+1)+' de '+bookPages.length;
+  document.getElementById('tapPrev').style.pointerEvents = curIdx>0 ? 'auto':'none';
+  document.getElementById('tapNext').style.pointerEvents = curIdx<bookPages.length-1 ? 'auto':'none';
+}
+
+function saveProgress(){
+  if(!currentBook||!bookPages.length) return;
+  const pct=Math.round(((curIdx+1)/bookPages.length)*100);
+  currentBook.progressPct=pct;
+  const ch=bookPages[curIdx].chapterIndex;
+  let s=curIdx,e=curIdx;
+  while(s>0&&bookPages[s-1].chapterIndex===ch) s--;
+  while(e<bookPages.length-1&&bookPages[e+1].chapterIndex===ch) e++;
+  const frac=(e>s)?(curIdx-s)/(e-s):0;
+  currentBook.progress={chapterIndex:ch,fracInChapter:frac};
+  dbPut(currentBook);
+}
+
+/* ═══════════════════ PAGE FLIP ENGINE ═══════════════════ */
+let flipActive=false, dragDir=0, dragStartX=0, dragPageW=1, lastDragFinish=0;
+
+const pageFlap    = document.getElementById('pageFlap');
+const pageShadow  = document.getElementById('pageShadow');
+const pageFront   = document.getElementById('pageFront');
+const pageBase    = document.getElementById('pageBase');
+const piBase      = document.getElementById('pageInnerBase');
+const flapFront   = document.getElementById('flapFrontInner');
+
+function prepareFlip(direction){
+  const target=curIdx+direction;
+  if(target<0||target>=bookPages.length) return false;
+  dragDir=direction;
+  // Base (destination page)
+  piBase.innerHTML=bookPages[target].html;
+  applyThemeTo(piBase);
+  applyHighlightsToEl(piBase, bookPages[target].chapterIndex);
+  // Flap front (source page – right half mirrors front)
+  flapFront.innerHTML=bookPages[curIdx].html;
+  applyThemeTo(flapFront);
+  // Show flap hidden at start
+  pageFlap.style.display='block';
+  pageShadow.style.display='block';
+  pageShadow.style.background='transparent';
+  return true;
+}
+
+function updateFlipVisuals(progress){
+  const pw = dragPageW;
+  const dir = dragDir;
+  if(dir===1){
+    // Next page: fold travels right→left
+    const foldX = pw*(1-progress);
+    // Clip front page (only left of fold visible)
+    pageFront.style.clipPath=`inset(0 ${pw-foldX}px 0 0)`;
+    // Position flap at fold
+    pageFlap.style.left  = foldX+'px';
+    pageFlap.style.right = '0';
+    pageFlap.style.width = (pw-foldX)+'px';
+    pageFlap.style.transformOrigin='left center';
+    pageFlap.style.transform=`rotateY(${-180*progress}deg)`;
+    // Flap front content right-aligned (shows the right portion of current page)
+    flapFront.style.width  = pw+'px';
+    flapFront.style.right  = '0';
+    flapFront.style.left   = 'auto';
+    // Shadow on base (stronger near fold line, fades right)
+    const sOpacity = Math.sin(progress*Math.PI)*0.38;
+    pageShadow.style.left='0'; pageShadow.style.right='0';
+    pageShadow.style.background=`linear-gradient(to right,rgba(0,0,0,${sOpacity}) 0%,rgba(0,0,0,${sOpacity*.5}) ${foldX/pw*60}%,transparent ${foldX/pw*90}%)`;
+  } else {
+    // Prev page: fold travels left→right
+    const foldX = pw*progress;
+    pageFront.style.clipPath=`inset(0 0 0 ${foldX}px)`;
+    pageFlap.style.left   = '0';
+    pageFlap.style.right  = (pw-foldX)+'px';
+    pageFlap.style.width  = foldX+'px';
+    pageFlap.style.transformOrigin='right center';
+    pageFlap.style.transform=`rotateY(${180*progress}deg)`;
+    flapFront.style.width  = pw+'px';
+    flapFront.style.left   = '0';
+    flapFront.style.right  = 'auto';
+    const sOpacity = Math.sin(progress*Math.PI)*0.38;
+    pageShadow.style.left='0'; pageShadow.style.right='0';
+    pageShadow.style.background=`linear-gradient(to left,rgba(0,0,0,${sOpacity}) 0%,rgba(0,0,0,${sOpacity*.5}) ${(pw-foldX)/pw*60}%,transparent ${(pw-foldX)/pw*90}%)`;
+  }
+}
+
+function commitFlip(progress){
+  flipActive=true;
+  const finalAngle = dragDir===1 ? -180 : 180;
+  pageFlap.style.transition=`transform .22s cubic-bezier(.3,.1,.3,1)`;
+  pageFront.style.transition=`clip-path .22s cubic-bezier(.3,.1,.3,1)`;
+  pageFlap.style.transform=`rotateY(${finalAngle}deg)`;
+  if(dragDir===1) pageFront.style.clipPath=`inset(0 ${dragPageW}px 0 0)`;
+  else            pageFront.style.clipPath=`inset(0 0 0 ${dragPageW}px)`;
+  setTimeout(()=>{
+    curIdx += dragDir;
+    resetFlip();
+    showPage(curIdx);
+    lastDragFinish=Date.now();
+    flipActive=false;
+  },220);
+}
+
+function cancelFlip(){
+  flipActive=true;
+  pageFlap.style.transition=`transform .2s cubic-bezier(.3,.1,.3,1)`;
+  pageFront.style.transition=`clip-path .2s cubic-bezier(.3,.1,.3,1)`;
+  pageFlap.style.transform=`rotateY(0deg)`;
+  pageFront.style.clipPath='none';
+  setTimeout(()=>{ resetFlip(); flipActive=false; },200);
+}
+
+function resetFlip(){
+  pageFlap.style.transition='none'; pageFront.style.transition='none';
+  pageFlap.style.display='none'; pageShadow.style.display='none';
+  pageFront.style.clipPath='none';
+  pageFlap.style.transform=''; dragDir=0;
+}
+
+/* Touch handlers */
+const stage = document.getElementById('pageStage');
+stage.addEventListener('touchstart', e=>{
+  if(flipActive) return;
+  dragStartX=e.touches[0].clientX;
+  dragPageW=stage.clientWidth||1;
+  dragDir=0;
+},{ passive:true });
+
+stage.addEventListener('touchmove', e=>{
+  if(flipActive) return;
+  const dx=e.touches[0].clientX-dragStartX;
+  if(Math.abs(dx)<6) return;
+  if(dragDir===0){
+    const want=dx<0?1:-1;
+    if(!prepareFlip(want)) return;
+    flipActive=false; // prep, not yet committed
+  }
+  const progress=Math.min(.99,Math.abs(dx)/dragPageW);
+  updateFlipVisuals(progress);
+},{ passive:true });
+
+stage.addEventListener('touchend', e=>{
+  if(dragDir===0){ return; }
+  if(flipActive) return;
+  const dx=e.changedTouches[0].clientX-dragStartX;
+  const progress=Math.min(1,Math.abs(dx)/dragPageW);
+  lastDragFinish=Date.now();
+  if(progress>0.3) commitFlip(progress);
+  else cancelFlip();
+},{ passive:true });
+
+/* Tap zones (click) */
+document.getElementById('tapNext').addEventListener('click',()=>{
+  if(flipActive||Date.now()-lastDragFinish<350) return;
+  if(curIdx>=bookPages.length-1) return;
+  dragPageW=stage.clientWidth||1;
+  if(!prepareFlip(1)) return;
+  updateFlipVisuals(0.01);
+  commitFlip(1);
+});
+document.getElementById('tapPrev').addEventListener('click',()=>{
+  if(flipActive||Date.now()-lastDragFinish<350) return;
+  if(curIdx<=0) return;
+  dragPageW=stage.clientWidth||1;
+  if(!prepareFlip(-1)) return;
+  updateFlipVisuals(0.01);
+  commitFlip(1);
+});
+document.getElementById('tapMid').addEventListener('click',()=>{
+  if(flipActive) return;
+  document.getElementById('openSettings').click();
+});
+
+/* Resize */
+let rTimer;
+window.addEventListener('resize',()=>{
+  if(!currentBook||!document.getElementById('reader').classList.contains('open')) return;
+  clearTimeout(rTimer); rTimer=setTimeout(()=>paginate(),300);
+});
+
+/* ═══════════════════ TEXT HIGHLIGHTING ═══════════════════ */
+function getTextOff(root, node, off){
+  const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT); let t=0,cur;
+  while((cur=w.nextNode())){ if(cur===node) return t+off; t+=cur.textContent.length; }
+  return t+off;
+}
+function findTextPos(root, target){
+  const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT); let t=0,cur;
+  while((cur=w.nextNode())){ const l=cur.textContent.length; if(t+l>=target) return {node:cur,offset:target-t}; t+=l; }
+  return null;
+}
+function applyHighlightsToEl(el, chapterIndex){
+  if(!currentBook) return;
+  const hl=(currentBook.highlights||[]).filter(h=>h.chapterIndex===chapterIndex);
+  hl.forEach(h=>{
+    try{
+      const sp=findTextPos(el,h.start), ep=findTextPos(el,h.end);
+      if(!sp||!ep) return;
+      const range=document.createRange();
+      range.setStart(sp.node,sp.offset); range.setEnd(ep.node,ep.offset);
+      const mark=document.createElement('mark');
+      mark.style.cssText=`background:${h.color};color:inherit;padding:0 2px;border-radius:2px`;
+      mark.dataset.hid=h.id;
+      range.surroundContents(mark);
+    }catch(e){}
+  });
+}
+
+const hiMenu=document.getElementById('hiMenu');
+let pendingSel=null;
+
+function showHiMenu(x,y,chapterIndex){
+  hiMenu.style.left=Math.min(x,window.innerWidth-130)+'px';
+  hiMenu.style.top=Math.max(44,y-48)+'px';
+  hiMenu.classList.add('show');
+  hiMenu.dataset.chapter=chapterIndex;
+}
+function hideHiMenu(){ hiMenu.classList.remove('show'); pendingSel=null; }
+
+document.getElementById('pageInnerFront').addEventListener('touchend', e=>{
+  setTimeout(()=>{
+    const sel=window.getSelection();
+    if(!sel||sel.isCollapsed) return;
+    const range=sel.getRangeAt(0);
+    const pi=document.getElementById('pageInnerFront');
+    if(!pi.contains(range.commonAncestorContainer)) return;
+    pendingSel={ start:getTextOff(pi,range.startContainer,range.startOffset),
+                 end:getTextOff(pi,range.endContainer,range.endOffset),
+                 range:range.cloneRange() };
+    const rect=range.getBoundingClientRect();
+    showHiMenu(rect.left+rect.width/2, rect.top, bookPages[curIdx].chapterIndex);
+  },100);
+});
+
+document.querySelectorAll('.hi-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    if(!pendingSel||!currentBook) return;
+    const color=btn.dataset.color;
+    if(!currentBook.highlights) currentBook.highlights=[];
+    currentBook.highlights.push({
+      id:'h_'+Date.now(),
+      chapterIndex:parseInt(hiMenu.dataset.chapter||'0'),
+      start:pendingSel.start, end:pendingSel.end, color
+    });
+    dbPut(currentBook);
+    window.getSelection()?.removeAllRanges();
+    hideHiMenu();
+    showPage(curIdx);
+  });
+});
+document.getElementById('hiErase').addEventListener('click',()=>{
+  const sel=window.getSelection();
+  if(sel&&!sel.isCollapsed){
+    const pi=document.getElementById('pageInnerFront');
+    const range=sel.getRangeAt(0);
+    const marks=Array.from(pi.querySelectorAll('mark'));
+    marks.forEach(m=>{
+      if(range.intersectsNode(m)&&m.dataset.hid&&currentBook){
+        currentBook.highlights=(currentBook.highlights||[]).filter(h=>h.id!==m.dataset.hid);
+      }
+    });
+    dbPut(currentBook);
+  }
+  window.getSelection()?.removeAllRanges();
+  hideHiMenu();
+  showPage(curIdx);
+});
+document.addEventListener('touchstart',e=>{
+  if(hiMenu.classList.contains('show')&&!hiMenu.contains(e.target)) hideHiMenu();
+},{ passive:true });
+
+/* ═══════════════════ SETTINGS ═══════════════════ */
+const backdrop=document.getElementById('sheetBackdrop');
+const sheet=document.getElementById('settingsSheet');
+document.getElementById('openSettings').addEventListener('click',()=>{ backdrop.classList.add('open'); sheet.classList.add('open'); });
+backdrop.addEventListener('click',closeSheet);
+function closeSheet(){ backdrop.classList.remove('open'); sheet.classList.remove('open'); }
+
+document.getElementById('fontMinus').addEventListener('click',()=>changeFont(-1));
+document.getElementById('fontPlus').addEventListener('click',()=>changeFont(1));
+function changeFont(d){
+  globalFontSize=Math.min(28,Math.max(13,globalFontSize+d));
+  localStorage.setItem('fontSize',globalFontSize);
+  applyGlobalTheme(); if(currentBook) paginate();
+}
+document.querySelectorAll('.font-pill').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    globalFont=btn.dataset.font;
+    localStorage.setItem('font',globalFont);
+    applyGlobalTheme(); if(currentBook) paginate();
+  });
+});
+document.querySelectorAll('.theme-swatch').forEach(sw=>{
+  sw.addEventListener('click',()=>{
+    globalTheme=sw.dataset.theme;
+    localStorage.setItem('theme',globalTheme);
+    applyGlobalTheme();
+  });
+});
+document.getElementById('removeBook').addEventListener('click',async()=>{
+  if(!currentBook) return;
+  if(confirm('Remover "'+currentBook.title+'" da estante?')){
+    await dbDelete(currentBook.id);
+    closeSheet();
+    document.getElementById('reader').classList.remove('open');
+    document.body.classList.remove('reading');
+    currentBook=null; bookPages=[];
+    await loadLibrary();
+  }
+});
+
+/* ═══════════════════ INIT ═══════════════════ */
+applyGlobalTheme();
+loadLibrary();
+if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+</script>
+</body>
+</html>
